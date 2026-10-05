@@ -4,11 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { PDFParse } = require('pdf-parse');
 const mammoth = require('mammoth');
-const { GoogleGenAI } = require('@google/genai');
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY
-});
+const { generateWithLLM } = require('./services/llmService');
 
 // ========================================
 // JOB DESCRIPTION
@@ -143,22 +139,18 @@ Return ONLY valid JSON in this exact format:
 }
 `;
 
-    console.log('🤖 Sending resume to Gemini...\n');
+  console.log('🤖 Sending resume to AI...\n');
 
     // ------------------------------------
-    // STEP 3: Send to Gemini
+    // STEP 3: Send to LLM
     // ------------------------------------
 
-    const interaction = await ai.interactions.create({
-      model: 'gemini-3.6-flash',
-      input: prompt
-    });
+  const responseText = await generateWithLLM(prompt);
 
     // ------------------------------------
     // STEP 4: Clean Gemini response
     // ------------------------------------
 
-    const responseText = interaction.output_text;
 
     const cleanedResponse = responseText
       .replace(/```json/g, '')
