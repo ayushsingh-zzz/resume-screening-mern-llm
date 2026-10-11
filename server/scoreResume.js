@@ -1,196 +1,116 @@
-require('dotenv').config();
 
-const fs = require('fs');
-const path = require('path');
-const { PDFParse } = require('pdf-parse');
-const mammoth = require('mammoth');
 const { generateWithLLM } = require('./services/llmService');
 
-// ========================================
-// JOB DESCRIPTION
-// ========================================
-
-const jobDescription = `
-We are hiring a Frontend Developer with 2+ years of experience in React.js.
-
-Required skills:
-React, JavaScript, HTML, CSS, REST APIs.
-
-Preferred:
-Redux and TypeScript.
-
-Education:
-Bachelor's degree in Computer Science or related field.
-`;
-
-// ========================================
-// RESUME TEXT EXTRACTION
-// ========================================
-
-async function extractResumeText(fileName) {
-  let parser;
-
-  try {
-    const filePath = path.join(
-      __dirname,
-      'test-resumes',
-      fileName
-    );
-
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Resume file not found: ${fileName}`);
-    }
-
-    const extension = path.extname(fileName).toLowerCase();
-    const dataBuffer = fs.readFileSync(filePath);
-
-    console.log(`📄 Reading: ${fileName}`);
-
-    // PDF
-    if (extension === '.pdf') {
-      parser = new PDFParse({
-        data: dataBuffer
-      });
-
-      const result = await parser.getText();
-
-      await parser.destroy();
-
-      return result.text;
-    }
-
-    // DOCX
-    if (extension === '.docx') {
-      const result = await mammoth.extractRawText({
-        buffer: dataBuffer
-      });
-
-      return result.value;
-    }
-
-    throw new Error(
-      'Unsupported file type. Only PDF and DOCX are allowed.'
-    );
-
-  } catch (error) {
-    if (parser) {
-      await parser.destroy();
-    }
-
-    throw error;
+async function scoreResume(resumeText, jobDescription) {
+  if (!resumeText || !resumeText.trim()) {
+    throw new Error('Resume text is empty.');
   }
-}
 
-// ========================================
-// GEMINI SCORING
-// ========================================
+  if (!jobDescription || !jobDescription.trim()) {
+    throw new Error('Job description is required.');
+  }
 
-async function scoreResume(fileName) {
-  try {
+  const prompt = `
+You are an AI resume screening assistant.
 
-    // ------------------------------------
-    // STEP 1: Extract resume text
-    // ------------------------------------
+Evaluate the resume against the job description.
+Use only evidence present in the resume. Do not invent qualifications.
 
-    const resumeText = await extractResumeText(fileName);
-
-    console.log('✅ Resume text extracted.\n');
-
-    // ------------------------------------
-    // STEP 2: Create AI prompt
-    // ------------------------------------
-
-    const prompt = `
-You are screening a candidate's resume against a job description.
-
-Job Description:
+JOB DESCRIPTION:
 ${jobDescription}
 
-Candidate Resume:
+RESUME:
 ${resumeText}
 
-Evaluate this candidate using the following weighted rubric:
+SCORING RUBRIC (100 points total):
+1. Skills Match: 0-40 points
+2. Experience Relevance: 0-30 points
+3. Education Fit: 0-15 points
+4. Project Relevance: 0-15 points
 
-- Skills Match (0-40 points): How well do the candidate's stated skills align with the required skills in the job description?
-- Experience Relevance (0-30 points): Are the candidate's years of experience and past roles relevant to this position?
-- Education Fit (0-15 points): Does the candidate's degree/field align with what the job requires?
-- Project Relevance (0-15 points): Do the candidate's projects demonstrate hands-on experience relevant to this role?
+Return ONLY valid JSON in this exact structure:
+{
+  "score": 0,
+  "breakdown": {
+    "skills": 0,
+    "experience": 0,
+    "education": 0,
+    "projects": 0
+  },
+  "matched_skills": [],
+  "missing_skills": [],
+  "summary": ""
+}
 
 Rules:
-- Only include skills that are explicitly mentioned in the resume text.
-- Do not infer or assume skills that aren't written.
-- Base the score strictly on the rubric above.
-- Do not add extra criteria.
-- Be concise in the summary — 2 lines maximum.
-
-Return ONLY valid JSON in this exact format:
-
-{
-  "score": <integer 0-100>,
-  "breakdown": {
-    "skills": <integer 0-40>,
-    "experience": <integer 0-30>,
-    "education": <integer 0-15>,
-    "projects": <integer 0-15>
-  },
-  "matched_skills": ["skill1", "skill2"],
-  "missing_skills": ["skill1", "skill2"],
-  "summary": "<2-line explanation of the score>"
-}
+- score must equal the sum of the four breakdown values.
+- Do not exceed any category's maximum points.
+- matched_skills and missing_skills must be arrays of strings.
+- summary must briefly explain the evaluation.
+- Return no Markdown or code fences.
 `;
-
-  console.log('🤖 Sending resume to AI...\n');
-
-    // ------------------------------------
-    // STEP 3: Send to LLM
-    // ------------------------------------
 
   const responseText = await generateWithLLM(prompt);
 
-    // ------------------------------------
-    // STEP 4: Clean Gemini response
-    // ------------------------------------
+  const cleanedText = responseText
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
 
+  let result;
 
-    const cleanedResponse = responseText
-      .replace(/```json/g, '')
-      .replace(/```/g, '')
-      .trim();
-
-    // ------------------------------------
-    // STEP 5: Convert response to JSON
-    // ------------------------------------
-
-    const scoreResult = JSON.parse(cleanedResponse);
-
-    // ------------------------------------
-    // STEP 6: Display result
-    // ------------------------------------
-
-    console.log('✅ AI screening completed!\n');
-
-    console.log('----- SCREENING RESULT -----\n');
-
-    console.log(
-      JSON.stringify(scoreResult, null, 2)
-    );
-
-    console.log('\n----- END -----');
-
-  } catch (error) {
-
-    console.error(
-      '❌ Failed:',
-      error.message
-    );
-
+  try {
+    result = JSON.parse(cleanedText);
+  } catch {
+    throw new Error('The AI returned an invalid JSON response.');
   }
+
+  const { score, breakdown, matched_skills, missing_skills, summary } = result;
+
+  if (
+    typeof score !== 'number' ||
+    !breakdown ||
+    typeof breakdown !== 'object' ||
+    !Array.isArray(matched_skills) ||
+    !Array.isArray(missing_skills) ||
+    typeof summary !== 'string'
+  ) {
+    throw new Error('The AI response does not match the expected result format.');
+  }
+
+  const categories = [
+    ['skills', 40],
+    ['experience', 30],
+    ['education', 15],
+    ['projects', 15]
+  ];
+
+  for (const [category, maximum] of categories) {
+    const points = breakdown[category];
+
+    if (
+      typeof points !== 'number' ||
+      points < 0 ||
+      points > maximum
+    ) {
+      throw new Error(`Invalid score for ${category}.`);
+    }
+  }
+
+  const calculatedScore = categories.reduce(
+    (total, [category]) => total + breakdown[category],
+    0
+  );
+
+  if (
+    score < 0 ||
+    score > 100 ||
+    score !== calculatedScore
+  ) {
+    throw new Error('The total score does not match the score breakdown.');
+  }
+
+  return result;
 }
 
-// ========================================
-// TEST RESUME
-// ========================================
-
-// Change this filename to test another resume.
-
-scoreResume('sample_resume.docx');
+module.exports = { scoreResume };

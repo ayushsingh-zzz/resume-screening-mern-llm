@@ -141,3 +141,20 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# ResumeScreen project-specific files
+server/test-resumes/
+server/uploads/
+
+# Keep environment variables private
+.env
+.env.*
+!.env.example
+
+# Backup files
+App copy.jsx
+index copy.css
