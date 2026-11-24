@@ -59,7 +59,8 @@ const resumeData = {
       end_date: 'June 2022',
       is_current: false,
       internship_type: 'training',
-      description: 'Completed a training internship in web development.'
+      description:
+        'Completed a training internship in web development.'
     }
   ],
 
@@ -84,7 +85,7 @@ const resumeData = {
   ]
 };
 
-// Test 1: Valid evidence
+// TEST 1: Valid evidence
 const validEvaluation = {
   evaluations: [
     {
@@ -101,7 +102,7 @@ const validEvaluation = {
   ]
 };
 
-// Test 2: Fabricated evidence
+// TEST 2: Fabricated evidence
 const fabricatedEvaluation = {
   evaluations: [
     {
@@ -118,7 +119,7 @@ const fabricatedEvaluation = {
   ]
 };
 
-// Test 3: Real quote, wrong section
+// TEST 3: Valid quote, wrong source section
 const wrongSectionEvaluation = {
   evaluations: [
     {
@@ -135,7 +136,62 @@ const wrongSectionEvaluation = {
   ]
 };
 
-function runTest(name, evaluation, shouldPass) {
+// TEST 4: Empty evidence quote
+const emptyEvidenceEvaluation = {
+  evaluations: [
+    {
+      requirement_id: 'R4',
+      status: 'MET',
+      evidence: [
+        {
+          source_section: 'work_experience',
+          evidence_quote: ''
+        }
+      ]
+    }
+  ]
+};
+
+// TEST 5: Altered evidence wording
+const alteredEvidenceEvaluation = {
+  evaluations: [
+    {
+      requirement_id: 'R5',
+      status: 'MET',
+      evidence: [
+        {
+          source_section: 'work_experience',
+          evidence_quote:
+            'Developed REST API endpoints using Java and Spring Boot.'
+        }
+      ]
+    }
+  ]
+};
+
+// TEST 6: Quote exists in resume but not in declared section
+const wrongLocationEvaluation = {
+  evaluations: [
+    {
+      requirement_id: 'R6',
+      status: 'MET',
+      evidence: [
+        {
+          source_section: 'work_experience',
+          evidence_quote: 'Rahul Sharma'
+        }
+      ]
+    }
+  ]
+};
+
+// Test helper
+function runTest(
+  name,
+  evaluation,
+  expectedStatus,
+  expectedEvidenceCount
+) {
   try {
     validateEvidence(
       evaluation,
@@ -143,24 +199,87 @@ function runTest(name, evaluation, shouldPass) {
       resumeData
     );
 
-    if (!shouldPass) {
-      console.log(`FAIL: ${name} should have been rejected.`);
-      return;
-    }
+    const result = evaluation.evaluations[0];
 
-    console.log(`PASS: ${name}`);
+    const passed =
+      result.status === expectedStatus &&
+      result.evidence.length === expectedEvidenceCount;
+
+    console.log(
+      `${passed ? 'PASS' : 'FAIL'}: ${name}`
+    );
+
+    console.log(`Status: ${result.status}`);
+    console.log(
+      `Valid evidence count: ${result.evidence.length}`
+    );
+
+    if (!passed) {
+      console.log(
+        `Expected status: ${expectedStatus}, evidence count: ${expectedEvidenceCount}`
+      );
+
+      process.exitCode = 1;
+    }
 
   } catch (error) {
-    if (shouldPass) {
-      console.log(`FAIL: ${name} - ${error.message}`);
-      return;
-    }
-
-    console.log(`PASS: ${name} correctly rejected.`);
-    console.log(error.message);
+    console.log(`FAIL: ${name} - ${error.message}`);
+    process.exitCode = 1;
   }
 }
 
-runTest('Valid evidence', validEvaluation, true);
-runTest('Fabricated evidence', fabricatedEvaluation, false);
-runTest('Wrong source section', wrongSectionEvaluation, false);
+// Run all tests
+console.log('\n=== EVIDENCE VALIDATOR TESTS ===');
+
+runTest(
+  'Valid evidence',
+  validEvaluation,
+  'MET',
+  1
+);
+
+runTest(
+  'Fabricated evidence',
+  fabricatedEvaluation,
+  'MISSING',
+  0
+);
+
+runTest(
+  'Wrong source section',
+  wrongSectionEvaluation,
+  'MISSING',
+  0
+);
+
+runTest(
+  'Empty evidence quote',
+  emptyEvidenceEvaluation,
+  'MISSING',
+  0
+);
+
+runTest(
+  'Altered evidence wording',
+  alteredEvidenceEvaluation,
+  'MISSING',
+  0
+);
+
+runTest(
+  'Quote outside declared section',
+  wrongLocationEvaluation,
+  'MISSING',
+  0
+);
+
+// Final result
+console.log('\n==============================');
+
+if (process.exitCode) {
+  console.log('SOME EVIDENCE TESTS FAILED');
+} else {
+  console.log('ALL EVIDENCE TESTS PASSED');
+}
+
+console.log('==============================');

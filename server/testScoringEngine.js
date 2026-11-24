@@ -80,14 +80,19 @@ try {
       passed: result.breakdown.education === 15
     },
     {
-      name: 'Empty projects category',
+      name: 'Empty projects category contributes zero',
       passed:
         result.breakdown.projects === 0 &&
-        result.category_applicable.projects === false
+        result.category_applicable.projects === false &&
+        result.category_maximums.projects === 15
     },
     {
-      name: 'Overall score',
+      name: 'Overall score follows frozen v11 denominator',
       passed: result.score === 62
+    },
+    {
+      name: 'Fixed scoring maximum remains 100',
+      passed: result.applicable_maximum === 100
     },
     {
       name: 'Matched skills',

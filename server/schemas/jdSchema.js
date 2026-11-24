@@ -47,17 +47,25 @@ const jdSchema = {
   additionalProperties: false
 };
 
+
 function validateJD(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error('JD analysis must be a JSON object.');
   }
 
-  if (typeof data.job_title !== 'string') {
+  if (
+    typeof data.job_title !== 'string' ||
+    !data.job_title.trim()
+  ) {
     throw new Error('Invalid or missing job_title.');
   }
 
   if (!Array.isArray(data.requirements)) {
     throw new Error('JD requirements must be an array.');
+  }
+
+  if (data.requirements.length === 0) {
+    throw new Error('No valid job requirements were extracted.');
   }
 
   const validCategories = [
@@ -75,20 +83,28 @@ function validateJD(data) {
 
   const seenIds = new Set();
 
-  for (const item of data.requirements) {
+  for (let i = 0; i < data.requirements.length; i++) {
+    const item = data.requirements[i];
+
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new Error('Invalid requirement object.');
     }
 
+    const expectedId = `R${i + 1}`;
+
     if (
       typeof item.requirement_id !== 'string' ||
-      !item.requirement_id.trim()
+      item.requirement_id !== expectedId
     ) {
-      throw new Error('Every requirement must have a valid ID.');
+      throw new Error(
+        `Invalid requirement ID. Expected ${expectedId}.`
+      );
     }
 
     if (seenIds.has(item.requirement_id)) {
-      throw new Error(`Duplicate requirement ID: ${item.requirement_id}`);
+      throw new Error(
+        `Duplicate requirement ID: ${item.requirement_id}`
+      );
     }
 
     seenIds.add(item.requirement_id);
@@ -97,19 +113,27 @@ function validateJD(data) {
       typeof item.requirement !== 'string' ||
       !item.requirement.trim()
     ) {
-      throw new Error(`Invalid requirement text: ${item.requirement_id}`);
+      throw new Error(
+        `Invalid requirement text: ${item.requirement_id}`
+      );
     }
 
     if (!validCategories.includes(item.category)) {
-      throw new Error(`Invalid category: ${item.requirement_id}`);
+      throw new Error(
+        `Invalid category: ${item.requirement_id}`
+      );
     }
 
     if (!validImportance.includes(item.importance)) {
-      throw new Error(`Invalid importance: ${item.requirement_id}`);
+      throw new Error(
+        `Invalid importance: ${item.requirement_id}`
+      );
     }
 
     if (typeof item.has_explicit_minimum_years !== 'boolean') {
-      throw new Error(`Invalid experience flag: ${item.requirement_id}`);
+      throw new Error(
+        `Invalid experience flag: ${item.requirement_id}`
+      );
     }
 
     if (
@@ -117,7 +141,18 @@ function validateJD(data) {
       !Number.isFinite(item.minimum_years) ||
       item.minimum_years < 0
     ) {
-      throw new Error(`Invalid minimum years: ${item.requirement_id}`);
+      throw new Error(
+        `Invalid minimum years: ${item.requirement_id}`
+      );
+    }
+
+    if (
+      item.has_explicit_minimum_years &&
+      item.minimum_years <= 0
+    ) {
+      throw new Error(
+        `Explicit minimum years must be greater than 0: ${item.requirement_id}`
+      );
     }
 
     if (
@@ -132,6 +167,7 @@ function validateJD(data) {
 
   return true;
 }
+
 
 module.exports = {
   jdSchema,

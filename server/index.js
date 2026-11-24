@@ -16,17 +16,60 @@ const jwt = require('jsonwebtoken');
 const scrypt = promisify(crypto.scrypt);
 
 const { parseResume } = require('./parseResume');
-const { scoreResume } = require('./scoreResume');
+const { runScreeningPipeline } = require('./screening/screeningPipeline');
 
 const Screening = require('./models/Screening');
 const User = require('./models/User');
 const authenticateToken = require('./middleware/auth');
 const JobCase = require('./models/JobCase');
+const ScoreCache = require('./models/ScoreCache');
+
+
+// ============================================
+// SCREENING CACHE CONFIGURATION
+// ============================================
+
+const SCORING_VERSION = 'v11-category-name-test-3';
+const PIPELINE_VERSION = 'v2-semantic-integration';
+
+function getCurrentMonthYear() {
+  const date = new Date();
+
+  const monthNames = [
+    'January', 'February', 'March', 'April',
+    'May', 'June', 'July', 'August',
+    'September', 'October', 'November', 'December'
+  ];
+
+  return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function createScreeningCacheKey({
+  resumeText,
+  jobDescription,
+  asOfDate
+}) {
+  const cacheData = {
+    resumeText,
+    jobDescription,
+    scoringVersion: SCORING_VERSION,
+    pipelineVersion: PIPELINE_VERSION,
+    asOfDate
+  };
+
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(cacheData))
+    .digest('hex');
+}
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+app.use(cors({
+  exposedHeaders: ['X-Screening-Cache']
+}));
 app.use(express.json());
 
 // Resume upload configuration
@@ -397,12 +440,84 @@ app.post(
           error: 'No readable text found in the resume.'
         });
       }
+// ============================================
+// SCREENING CACHE LOOKUP
+// ============================================
 
-      // Evaluate resume against the selected case
-      const result = await scoreResume(
-        resumeText,
-        jobDescription
-      );
+const asOfDate = getCurrentMonthYear();
+
+const cacheKey = createScreeningCacheKey({
+  resumeText,
+  jobDescription,
+  asOfDate
+});
+
+let result = null;
+let cacheHit = false;
+
+// Check whether this exact evaluation already exists.
+try {
+  const cachedResult = await ScoreCache
+    .findOne({ cacheKey })
+    .lean();
+
+  if (cachedResult && cachedResult.result) {
+    result = cachedResult.result;
+    cacheHit = true;
+
+    console.log('[Cache HIT] Reusing previous screening result.');
+  }
+} catch (cacheError) {
+  console.error(
+    '[Cache READ ERROR]',
+    cacheError.message
+  );
+
+  console.log('Continuing with fresh screening...');
+}
+
+// ============================================
+// RUN PIPELINE ON CACHE MISS
+// ============================================
+
+if (!cacheHit) {
+  console.log('[Cache MISS] Running screening pipeline...');
+
+  result = await runScreeningPipeline({
+    resumeText,
+    jobDescription,
+    asOfDate
+  });
+
+  // Store the complete validated result.
+  try {
+    await ScoreCache.updateOne(
+      { cacheKey },
+      {
+        $setOnInsert: {
+          cacheKey,
+          result
+        }
+      },
+      { upsert: true }
+    );
+
+    console.log('[Cache SAVE] Screening result cached.');
+  } catch (cacheError) {
+    console.error(
+      '[Cache WRITE ERROR]',
+      cacheError.message
+    );
+
+    // A cache write failure must not discard
+    // a successfully completed screening.
+  }
+}
+
+console.log(
+  `[Screening] Evaluation source: ${cacheHit ? 'CACHE' : 'PIPELINE'}`
+);
+
 
       console.log(
         'Screening result:',
@@ -421,6 +536,11 @@ app.post(
       console.log(
         'Screening saved successfully:',
         screening._id.toString()
+      );
+
+      res.set(
+       'X-Screening-Cache',
+        cacheHit ? 'HIT' : 'MISS'
       );
 
       return res.status(200).json({

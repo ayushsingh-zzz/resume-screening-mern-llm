@@ -1,4 +1,4 @@
-
+require('dotenv').config();
 const {
   analyzeJobDescription
 } = require('./screening/jdAnalyzer');
@@ -70,7 +70,9 @@ Status: Completed.
 
     const evaluation = await evaluateRequirements(
       jobData,
-      resumeData
+      resumeData,
+      [],
+      resumeText
     );
 
     console.log(JSON.stringify(evaluation, null, 2));

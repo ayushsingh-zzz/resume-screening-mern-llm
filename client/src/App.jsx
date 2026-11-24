@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 
 const API_URL = 'http://localhost:5000/api';
@@ -146,7 +146,7 @@ const handleAuth = async (e) => {
 
 
   // Logout handler
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('resumeScreenToken');
     localStorage.removeItem('resumeScreenUser');
 
@@ -171,15 +171,15 @@ const handleAuth = async (e) => {
     setAuthConfirmPassword('');
     setShowAuthPassword(false);
     setAuthMode('login');
-  };
+  },[]);
 
-  // Handle expired or invalid sessions
-  const handleSessionExpired = () => {
-    handleLogout();
-    setAuthError(
-      'Your session has expired. Please sign in again.'
-    );
-  };
+// Handle expired or invalid sessions
+const handleSessionExpired = useCallback(() => {
+  handleLogout();
+  setAuthError(
+    'Your session has expired. Please sign in again.'
+  );
+}, [handleLogout]);
 
   // Create a new recruitment case
   const handleCreateCase = async (e) => {
@@ -305,11 +305,11 @@ const handleAuth = async (e) => {
     return () => {
       isActive = false;
     };
-  }, [authToken]);
+  }, [authToken, handleSessionExpired]);
 
   // Resume file validation
   const handleFile = (file) => {
-    if (!file) return;
+  if (!file) return;
 
     const allowedTypes = [
       'application/pdf',
@@ -329,7 +329,7 @@ const handleAuth = async (e) => {
     setResume(file);
     setError('');
     setEvaluation(null);
-  };
+  }
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -354,17 +354,28 @@ const handleAuth = async (e) => {
 
     try {
       const response = await fetch(
-        `${API_URL}/screen`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${authToken}`
-          },
-          body: formData
-        }
-      );
+  `${API_URL}/screen`,
+  {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${authToken}`
+    },
+    body: formData
+  }
+);
 
-      const data = await response.json();
+// Read cache status from backend response.
+const cacheStatus = response.headers.get('X-Screening-Cache');
+
+if (cacheStatus === 'HIT') {
+  console.info('🟡 [ZenVett Cache] CACHE HIT - Reusing previous result.');
+} else if (cacheStatus === 'MISS') {
+  console.info('🟢 [ZenVett Cache] CACHE MISS - Fresh screening executed.');
+} else {
+  console.warn('[ZenVett Cache] Cache status unavailable.');
+}
+
+const data = await response.json();
 
       if (response.status === 401) {
         handleSessionExpired();
@@ -1151,16 +1162,37 @@ const handleDeleteScreening = async (screeningId) => {
                       </div>
                       <div className="comparison-metrics">
                         {[
-                          ['Skills', breakdown.skills, 40],
-                          ['Experience', breakdown.experience, 30],
-                          ['Education', breakdown.education, 15],
-                          ['Projects', breakdown.projects, 15]
-                        ].map(([label, value, max]) => (
-                          <div className="comparison-metric" key={label}>
-                            <span>{label}</span>
-                            <strong>{value == null ? '—' : `${Number(value).toFixed(1)}/${max}`}</strong>
-                          </div>
-                        ))}
+  ['Skills', 'skills'],
+  ['Experience', 'experience'],
+  ['Education', 'education'],
+  ['Projects', 'projects']
+].map(([label, category]) => {
+  const applicable =
+    result.category_applicable?.[category] ??
+    breakdown[category] != null;
+
+  const value = breakdown[category];
+
+  const max =
+    result.category_maximums?.[category] ??
+    ({
+      skills: 40,
+      experience: 30,
+      education: 15,
+      projects: 15
+    }[category]);
+
+  return (
+    <div className="comparison-metric" key={category}>
+      <span>{label}</span>
+      <strong>
+        {applicable
+          ? `${Number(value).toFixed(1)}/${max}`
+          : 'N/A'}
+      </strong>
+    </div>
+  );
+})}
                       </div>
                       <div className="comparison-skills">
                         <h4>Matched skills</h4>
@@ -1763,66 +1795,55 @@ Key Responsibilities:
 
               <h3>Score breakdown</h3>
 
-              <div className="score-breakdown">
-                {[
-                  [
-                    'Skills Match',
-                    evaluation.breakdown?.skills,
-                    40
-                  ],
-                  [
-                    'Experience Relevance',
-                    evaluation.breakdown?.experience,
-                    30
-                  ],
-                  [
-                    'Education Fit',
-                    evaluation.breakdown?.education,
-                    15
-                  ],
-                  [
-                    'Project Relevance',
-                    evaluation.breakdown?.projects,
-                    15
-                  ]
-                ].map(([label, rawScore, maximum]) => {
-                  const score = Math.max(
-                    0,
-                    Math.min(
-                      maximum,
-                      Number(rawScore) || 0
-                    )
-                  );
+             <div className="score-breakdown">
+  {[
+    ['Skills Match', 'skills'],
+    ['Experience Relevance', 'experience'],
+    ['Education Fit', 'education'],
+    ['Project Relevance', 'projects']
+  ].map(([label, category]) => {
+    const applicable =
+      evaluation.category_applicable?.[category] ??
+      evaluation.breakdown?.[category] != null;
 
-                  const percentage =
-                    (score / maximum) * 100;
+    const score = evaluation.breakdown?.[category];
 
-                  return (
-                    <div
-                      className="score-row"
-                      key={label}
-                    >
-                      <div className="score-row-label">
-                        <span>{label}</span>
+    const maximum =
+      evaluation.category_maximums?.[category] ??
+      ({
+        skills: 40,
+        experience: 30,
+        education: 15,
+        projects: 15
+      }[category]);
 
-                        <strong>
-                          {Number(score.toFixed(2))}
-                          /{maximum}
-                        </strong>
-                      </div>
+    const percentage = applicable
+      ? (Number(score) / maximum) * 100
+      : 0;
 
-                      <div className="score-track">
-                        <div
-                          className="score-fill"
-                          style={{
-                            width: `${percentage}%`
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+    return (
+      <div className="score-row" key={category}>
+        <div className="score-row-label">
+          <span>{label}</span>
+          <strong>
+            {applicable
+              ? `${Number(score).toFixed(2)}/${maximum}`
+              : 'N/A'}
+          </strong>
+        </div>
+
+        {applicable && (
+          <div className="score-track">
+            <div
+              className="score-fill"
+              style={{ width: `${percentage}%` }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  })}
+</div>
 
               <div className="skill-columns">
                 <div>
@@ -1885,10 +1906,26 @@ Key Responsibilities:
 
   <div className="semantic-list">
     {evaluation.requirements.map((item, index) => {
-      const evidence =
-        typeof item.semantic_evidence === 'string'
-          ? item.semantic_evidence.trim()
-          : '';
+      const evidenceItems = Array.isArray(item.evidence)
+  ? item.evidence.filter(
+      (entry) =>
+        entry &&
+        typeof entry.evidence_quote === 'string' &&
+        entry.evidence_quote.trim()
+    )
+  : [];
+
+const semanticEvidence =
+  typeof item.semantic_evidence === 'string'
+    ? item.semantic_evidence.trim()
+    : '';
+
+const hasSemanticEvidence =
+  item.semantic_evidence_relevant &&
+  Boolean(semanticEvidence);
+
+const hasEvidence =
+  evidenceItems.length > 0 || hasSemanticEvidence;
 
       const status = String(
         item.status || 'unassessed'
@@ -1928,18 +1965,32 @@ Key Responsibilities:
           </div>
 
           <div className="semantic-evidence">
-            <strong>
-              {item.semantic_evidence_relevant && evidence
-                ? 'Supporting resume evidence'
-                : 'No reliable evidence found'}
-            </strong>
+  <strong>
+    {hasEvidence
+      ? 'Supporting resume evidence'
+      : 'No reliable evidence found'}
+  </strong>
 
-            <p>
-              {item.semantic_evidence_relevant && evidence
-                ? evidence
-                : 'The system could not identify sufficiently relevant supporting text in the resume.'}
-            </p>
-          </div>
+  {evidenceItems.length > 0 ? (
+    evidenceItems.map((entry, evidenceIndex) => (
+      <p key={evidenceIndex}>
+        <strong>
+          {String(entry.source_section || 'resume')
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, (char) => char.toUpperCase())}
+          :
+        </strong>{' '}
+        "{entry.evidence_quote}"
+      </p>
+    ))
+  ) : (
+    <p>
+      {hasSemanticEvidence
+       ? semanticEvidence
+       : 'The system could not identify sufficiently relevant supporting text in the resume.'}
+    </p>
+  )}
+</div>
         </article>
       );
     })}

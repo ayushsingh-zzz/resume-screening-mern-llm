@@ -131,9 +131,36 @@ const resumeSchema = {
   additionalProperties: false
 };
 
+
+function isString(value) {
+  return typeof value === 'string';
+}
+
+function hasText(value) {
+  return isString(value) && value.trim().length > 0;
+}
+
+function validateStringFields(record, fields, section) {
+  for (const field of fields) {
+    if (!isString(record[field])) {
+      throw new Error(
+        `Invalid ${field} in ${section}.`
+      );
+    }
+  }
+}
+
 function validateResume(data) {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data)
+  ) {
     throw new Error('Resume data must be a JSON object.');
+  }
+
+  if (!isString(data.candidate_name)) {
+    throw new Error('Invalid candidate_name.');
   }
 
   const arrayFields = [
@@ -144,37 +171,57 @@ function validateResume(data) {
     'education'
   ];
 
-  if (typeof data.candidate_name !== 'string') {
-    throw new Error('Invalid candidate_name.');
-  }
-
   for (const field of arrayFields) {
     if (!Array.isArray(data[field])) {
       throw new Error(`${field} must be an array.`);
     }
   }
 
-  const isString = value => typeof value === 'string';
-
+  // Skills
   for (const skill of data.skills) {
-    if (!isString(skill.skill) || !isString(skill.context)) {
+    if (!skill || typeof skill !== 'object' || Array.isArray(skill)) {
       throw new Error('Invalid skill entry.');
+    }
+
+    validateStringFields(
+      skill,
+      ['skill', 'context'],
+      'skills'
+    );
+
+    if (!hasText(skill.skill)) {
+      throw new Error('Skill name cannot be empty.');
     }
   }
 
+  // Professional employment
   for (const job of data.work_experience) {
+    if (!job || typeof job !== 'object' || Array.isArray(job)) {
+      throw new Error('Invalid work experience entry.');
+    }
+
+    validateStringFields(
+      job,
+      [
+        'role',
+        'company',
+        'start_date',
+        'end_date',
+        'description'
+      ],
+      'work_experience'
+    );
+
     if (
-      !isString(job.role) ||
-      !isString(job.company) ||
-      !isString(job.start_date) ||
-      !isString(job.end_date) ||
       typeof job.is_current !== 'boolean' ||
-      !isString(job.description)
+      !hasText(job.role) ||
+      !hasText(job.company)
     ) {
       throw new Error('Invalid work experience entry.');
     }
   }
 
+  // Internships
   const internshipTypes = [
     'professional',
     'training',
@@ -184,18 +231,36 @@ function validateResume(data) {
 
   for (const internship of data.internships) {
     if (
-      !isString(internship.role) ||
-      !isString(internship.organization) ||
-      !isString(internship.start_date) ||
-      !isString(internship.end_date) ||
+      !internship ||
+      typeof internship !== 'object' ||
+      Array.isArray(internship)
+    ) {
+      throw new Error('Invalid internship entry.');
+    }
+
+    validateStringFields(
+      internship,
+      [
+        'role',
+        'organization',
+        'start_date',
+        'end_date',
+        'description'
+      ],
+      'internships'
+    );
+
+    if (
       typeof internship.is_current !== 'boolean' ||
       !internshipTypes.includes(internship.internship_type) ||
-      !isString(internship.description)
+      !hasText(internship.role) ||
+      !hasText(internship.organization)
     ) {
       throw new Error('Invalid internship entry.');
     }
   }
 
+  // Projects
   const projectTypes = [
     'academic',
     'personal',
@@ -205,16 +270,32 @@ function validateResume(data) {
 
   for (const project of data.projects) {
     if (
-      !isString(project.name) ||
+      !project ||
+      typeof project !== 'object' ||
+      Array.isArray(project)
+    ) {
+      throw new Error('Invalid project entry.');
+    }
+
+    validateStringFields(
+      project,
+      ['name', 'description'],
+      'projects'
+    );
+
+    if (
+      !hasText(project.name) ||
       !projectTypes.includes(project.project_type) ||
       !Array.isArray(project.technologies) ||
-      !project.technologies.every(isString) ||
-      !isString(project.description)
+      !project.technologies.every(
+        technology => isString(technology)
+      )
     ) {
       throw new Error('Invalid project entry.');
     }
   }
 
+  // Education
   const educationStatuses = [
     'completed',
     'ongoing',
@@ -224,11 +305,27 @@ function validateResume(data) {
 
   for (const education of data.education) {
     if (
-      !isString(education.qualification) ||
-      !isString(education.institution) ||
-      !isString(education.field_of_study) ||
-      !isString(education.start_date) ||
-      !isString(education.end_date) ||
+      !education ||
+      typeof education !== 'object' ||
+      Array.isArray(education)
+    ) {
+      throw new Error('Invalid education entry.');
+    }
+
+    validateStringFields(
+      education,
+      [
+        'qualification',
+        'institution',
+        'field_of_study',
+        'start_date',
+        'end_date'
+      ],
+      'education'
+    );
+
+    if (
+      !hasText(education.qualification) ||
       !educationStatuses.includes(education.status)
     ) {
       throw new Error('Invalid education entry.');
@@ -237,6 +334,7 @@ function validateResume(data) {
 
   return true;
 }
+
 
 module.exports = {
   resumeSchema,

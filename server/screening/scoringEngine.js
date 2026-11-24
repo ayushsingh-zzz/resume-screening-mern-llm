@@ -22,8 +22,7 @@ function roundToTwo(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function calculateScores({ jobData, evaluationData }) {
-    function buildSummary(requirements) {
+function buildSummary(requirements) {
   const counts = {
     met: 0,
     partial: 0,
@@ -54,6 +53,8 @@ function calculateScores({ jobData, evaluationData }) {
 
   return `Based on the information stated in the submitted resume, ${parts.join(', ')}. These results describe evidence presented in the resume; they do not independently authenticate candidate claims.`;
 }
+
+function calculateScores({ jobData, evaluationData }) {
   if (!Array.isArray(jobData?.requirements)) {
     throw new Error('Invalid job requirements.');
   }
@@ -77,10 +78,7 @@ function calculateScores({ jobData, evaluationData }) {
       );
     }
 
-    evaluationMap.set(
-      evaluation.requirement_id,
-      evaluation
-    );
+    evaluationMap.set(evaluation.requirement_id, evaluation);
   }
 
   const seenRequirements = new Set();
@@ -93,10 +91,7 @@ function calculateScores({ jobData, evaluationData }) {
       importance
     } = requirement;
 
-    if (
-      !requirement_id ||
-      seenRequirements.has(requirement_id)
-    ) {
+    if (!requirement_id || seenRequirements.has(requirement_id)) {
       throw new Error(
         `Invalid or duplicate requirement: ${requirement_id}`
       );
@@ -141,15 +136,14 @@ function calculateScores({ jobData, evaluationData }) {
   });
 
   if (evaluationMap.size !== requirements.length) {
-    throw new Error(
-      'Evaluation results contain unknown requirements.'
-    );
+    throw new Error('Evaluation results contain unknown requirements.');
   }
 
-  // Deterministic weighted scoring.
+  // Fixed v11 category maximums.
   const breakdown = {};
   const categoryRequirementCounts = {};
   const categoryApplicable = {};
+  const categoryMaximums = {};
 
   for (const [category, maximum] of Object.entries(CATEGORY_MAX)) {
     const categoryItems = assessedRequirements.filter(
@@ -158,6 +152,14 @@ function calculateScores({ jobData, evaluationData }) {
 
     categoryRequirementCounts[category] = categoryItems.length;
     categoryApplicable[category] = categoryItems.length > 0;
+    categoryMaximums[category] = maximum;
+
+    // An empty category contributes zero.
+    // Its maximum is never removed from the 100-point scale.
+    if (categoryItems.length === 0) {
+      breakdown[category] = 0;
+      continue;
+    }
 
     let earned = 0;
     let possible = 0;
@@ -169,18 +171,18 @@ function calculateScores({ jobData, evaluationData }) {
       possible += weight;
     }
 
-    breakdown[category] = possible === 0
-      ? 0
-      : roundToTwo(
-          Math.min(maximum, (earned / possible) * maximum)
-        );
+    breakdown[category] = roundToTwo(
+      Math.min(maximum, (earned / possible) * maximum)
+    );
   }
 
+  // All four category maximums total exactly 100.
+  const applicableMaximum = Object.values(CATEGORY_MAX)
+    .reduce((total, maximum) => total + maximum, 0);
+
   const score = roundToTwo(
-    Object.values(breakdown).reduce(
-      (total, value) => total + value,
-      0
-    )
+    Object.values(breakdown)
+      .reduce((total, value) => total + value, 0)
   );
 
   // Build skill lists from validated statuses.
@@ -218,6 +220,8 @@ function calculateScores({ jobData, evaluationData }) {
     summary: buildSummary(assessedRequirements),
     category_requirement_counts: categoryRequirementCounts,
     category_applicable: categoryApplicable,
+    category_maximums: categoryMaximums,
+    applicable_maximum: applicableMaximum,
     matched_skills: matchedSkills,
     partially_matched_skills: partiallyMatchedSkills,
     missing_skills: missingSkills,

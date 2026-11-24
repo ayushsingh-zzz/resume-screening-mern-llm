@@ -79,6 +79,7 @@ function validateEvaluation(data, requirements, resume) {
   }
 
   const validStatuses = ['MET', 'PARTIAL', 'MISSING'];
+
   const validSections = [
     'skills',
     'work_experience',
@@ -154,6 +155,17 @@ function validateEvaluation(data, requirements, resume) {
       );
     }
 
+    // Normalize omitted reference arrays.
+    // Missing references mean no records were selected.
+    if (item.relevant_work_experience_indices === undefined) {
+      item.relevant_work_experience_indices = [];
+    }
+
+    if (item.relevant_internship_indices === undefined) {
+      item.relevant_internship_indices = [];
+    }
+
+    // Reject invalid reference types.
     if (
       !Array.isArray(item.relevant_work_experience_indices) ||
       !Array.isArray(item.relevant_internship_indices)
@@ -163,6 +175,7 @@ function validateEvaluation(data, requirements, resume) {
       );
     }
 
+    // Validate work experience indices.
     for (const index of item.relevant_work_experience_indices) {
       if (
         !Number.isInteger(index) ||
@@ -175,6 +188,7 @@ function validateEvaluation(data, requirements, resume) {
       }
     }
 
+    // Validate internship indices.
     for (const index of item.relevant_internship_indices) {
       if (
         !Number.isInteger(index) ||

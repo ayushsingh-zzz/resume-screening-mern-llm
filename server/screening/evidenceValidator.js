@@ -1,4 +1,3 @@
-
 const SECTION_FIELDS = {
   skills: ['skills'],
   work_experience: ['work_experience'],
@@ -7,7 +6,7 @@ const SECTION_FIELDS = {
   education: ['education']
 };
 
-// Normalize whitespace and Unicode for reliable text comparison.
+// Normalize Unicode, whitespace and case for reliable text comparison.
 function normalizeText(value) {
   return String(value)
     .normalize('NFC')
@@ -51,7 +50,51 @@ function buildSectionText(resumeData, section) {
   return normalizeText(values.join(' '));
 }
 
-function validateEvidence(evaluationData, resumeText, resumeData) {
+// A quote must exist continuously inside one actual field value.
+function quoteExistsInSection(resumeData, section, quote) {
+  const fields = SECTION_FIELDS[section];
+
+  if (!fields) {
+    return false;
+  }
+
+  const values = [];
+
+  for (const field of fields) {
+    collectStrings(resumeData[field], values);
+  }
+
+  return values.some(value =>
+    normalizeText(value).includes(quote)
+  );
+}
+
+function appendExplanation(evaluation, message) {
+  evaluation.explanation = [
+    evaluation.explanation,
+    message
+  ].filter(Boolean).join(' ');
+}
+
+// Temporary diagnostic logging.
+function logRejectedEvidence(evaluation, item, reason) {
+  console.warn('[Evidence Validator] Rejected evidence:', {
+    requirementId:
+      evaluation.requirement_id ??
+      evaluation.requirementId ??
+      evaluation.id ??
+      'unknown',
+    quote: item?.evidence_quote ?? null,
+    sourceSection: item?.source_section ?? null,
+    reason
+  });
+}
+
+function validateEvidence(
+  evaluationData,
+  resumeText,
+  resumeData
+) {
   if (
     !evaluationData ||
     !Array.isArray(evaluationData.evaluations)
@@ -71,57 +114,147 @@ function validateEvidence(evaluationData, resumeText, resumeData) {
   }
 
   const originalText = normalizeText(resumeText);
-  const errors = [];
+
+  let rejectedEvidenceCount = 0;
 
   for (const evaluation of evaluationData.evaluations) {
+    let evaluationRejectedCount = 0;
+
     if (!Array.isArray(evaluation.evidence)) {
-      errors.push(
-        `${evaluation.requirement_id}: evidence must be an array.`
+      logRejectedEvidence(
+        evaluation,
+        null,
+        'Evidence is not an array'
       );
-      continue;
+
+      evaluation.evidence = [];
+      rejectedEvidenceCount++;
+      evaluationRejectedCount++;
+
+      appendExplanation(
+        evaluation,
+        'Evidence validation: invalid evidence data was discarded.'
+      );
     }
 
-    for (let i = 0; i < evaluation.evidence.length; i++) {
-      const item = evaluation.evidence[i];
+    const validEvidence = [];
 
+    for (const item of evaluation.evidence) {
       if (
         !item ||
         typeof item.evidence_quote !== 'string' ||
         !item.evidence_quote.trim()
       ) {
-        errors.push(
-          `${evaluation.requirement_id}: evidence ${i + 1} has an invalid quote.`
+        logRejectedEvidence(
+          evaluation,
+          item,
+          'Invalid or empty evidence quote'
         );
+
+        rejectedEvidenceCount++;
+        evaluationRejectedCount++;
         continue;
       }
 
       const quote = normalizeText(item.evidence_quote);
 
-      // Check whether the quote exists in the original resume.
-      if (!originalText.includes(quote)) {
-        errors.push(
-          `${evaluation.requirement_id}: quote not found in original resume: "${item.evidence_quote}"`
+      if (!quote) {
+        logRejectedEvidence(
+          evaluation,
+          item,
+          'Evidence quote became empty after normalization'
         );
+
+        rejectedEvidenceCount++;
+        evaluationRejectedCount++;
         continue;
       }
 
-      // Check whether the quote belongs to the claimed section.
-      const sectionText = buildSectionText(
-        resumeData,
-        item.source_section
-      );
-
-      if (!sectionText.includes(quote)) {
-        errors.push(
-          `${evaluation.requirement_id}: quote does not match section "${item.source_section}": "${item.evidence_quote}"`
+      // Verify the quote exists in the original resume.
+      if (!originalText.includes(quote)) {
+        logRejectedEvidence(
+          evaluation,
+          item,
+          'Quote not found in original resume text'
         );
+
+        rejectedEvidenceCount++;
+        evaluationRejectedCount++;
+        continue;
       }
+
+      // Verify the declared section is valid.
+      if (!SECTION_FIELDS[item.source_section]) {
+        logRejectedEvidence(
+          evaluation,
+          item,
+          'Invalid source section'
+        );
+
+        rejectedEvidenceCount++;
+        evaluationRejectedCount++;
+        continue;
+      }
+
+      // Verify the quote exists in the claimed section
+      // and within one continuous field value.
+      if (
+        !quoteExistsInSection(
+          resumeData,
+          item.source_section,
+          quote
+        )
+      ) {
+        logRejectedEvidence(
+          evaluation,
+          item,
+          'Quote not found continuously in declared structured resume section'
+        );
+
+        rejectedEvidenceCount++;
+        evaluationRejectedCount++;
+        continue;
+      }
+
+      // Keep the original quote unchanged.
+      validEvidence.push(item);
+    }
+
+    evaluation.evidence = validEvidence;
+
+    // A MET or PARTIAL result cannot survive without
+    // at least one valid supporting evidence quote.
+    const currentStatus = String(
+      evaluation.status || ''
+    ).toUpperCase();
+
+    if (
+      validEvidence.length === 0 &&
+      (
+        currentStatus === 'MET' ||
+        currentStatus === 'PARTIAL'
+      )
+    ) {
+      evaluation.status = 'MISSING';
+
+      appendExplanation(
+        evaluation,
+        'Evidence validation: no valid supporting resume evidence remained after verification. The requirement was marked MISSING.'
+      );
+    } else if (
+      evaluationRejectedCount > 0 &&
+      validEvidence.length > 0
+    ) {
+      appendExplanation(
+        evaluation,
+        'Evidence validation: unsupported evidence entries were discarded; the remaining quotes were verified against the resume.'
+      );
     }
   }
 
-  if (errors.length > 0) {
-    throw new Error(
-      'Evidence validation failed:\n- ' + errors.join('\n- ')
+  if (rejectedEvidenceCount > 0) {
+    console.warn(
+      `[Evidence Validator] Discarded ${rejectedEvidenceCount} invalid evidence entr${rejectedEvidenceCount === 1 ? 'y' : 'ies'}.`
     );
   }
 
